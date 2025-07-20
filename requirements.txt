@@ -1,11 +1,12 @@
 streamlit
 pandas
 numpy
-requests
 matplotlib
 seaborn
 scikit-learn
 imbalanced-learn
 xgboost
 openpyxl
+selenium
 email-validator
+requests
