@@ -768,17 +768,111 @@ Thank you for using our AI service.
 Regards,
 The Agentic AutoML AI Team
 """
-                send_email_report("Final AutoML Model Report", model_summary, client_email)
-                st.session_state['final_report_sent'] = True # Mark as sent
-                st.rerun() # Rerun to remove warning/update display
+               send_email_report("Final AutoML Model Report", model_summary, client_email)
+st.session_state['final_report_sent'] = True  # Mark as sent
+st.rerun()  # Rerun to remove warning/update display
 
-            if st.session_state.best_model is not None:
-                st.markdown("---")
-                # --- Agent 5: Prediction Interface ---
-                st.sidebar.write(f"**{AGENT_NAMES['predict']} Status:**")
-                prediction_interface_agent() # Call prediction_interface_agent (no args needed, uses session_state)
-                st.sidebar.info("Prediction interface ready.")
-            else:
-                st.sidebar.warning("Prediction interface not available: No model trained.")
-        else:
-            st.sidebar.info("Awaiting client confirmation for model training.")
+if st.session_state.best_model is not None:
+    st.markdown("---")
+
+    def prediction_interface_agent():
+        """
+        Provides a simple interface for making predictions with the trained model.
+        Uses st.session_state to retrieve model and data.
+        """
+        st.subheader(f"🔮 {AGENT_NAMES['predict']}: Prediction Interface")
+
+        if st.session_state.best_model is None:
+            st.warning("No model has been trained yet. Please complete model training.")
+            return
+
+        model = st.session_state.best_model
+        model_info = st.session_state.best_model_info
+        target_column_name = st.session_state.target_column_name
+        X_sample_data = st.session_state.X_processed
+        is_classification = st.session_state.is_classification_task
+
+        if X_sample_data is None or not isinstance(X_sample_data, pd.DataFrame) or X_sample_data.empty:
+            st.warning("Processed feature data (X_processed) is not available. Cannot generate prediction inputs.")
+            return
+
+        feature_columns = X_sample_data.columns.tolist()
+
+        st.write("Enter values for features to get a prediction:")
+
+        # 🧠 Initialize prediction input state
+        if 'prediction_inputs' not in st.session_state or set(st.session_state.prediction_inputs.keys()) != set(feature_columns):
+            st.session_state['prediction_inputs'] = {
+                col: 0.0 if pd.api.types.is_numeric_dtype(X_sample_data[col]) else "" for col in feature_columns
+            }
+
+        # ✅ Start of form block
+        with st.form("prediction_form_main"):
+            input_data = {}
+            num_cols_per_row = 2
+            cols = st.columns(num_cols_per_row)
+
+            for i, col_name in enumerate(feature_columns):
+                current_col = cols[i % num_cols_per_row]
+                current_value = st.session_state['prediction_inputs'][col_name]
+                key_for_widget = f"pred_input_{col_name}_widget"
+
+                if pd.api.types.is_numeric_dtype(X_sample_data[col_name]):
+                    input_data[col_name] = current_col.number_input(
+                        f"Enter value for {col_name}:",
+                        value=float(current_value) if isinstance(current_value, (int, float)) else 0.0,
+                        key=key_for_widget
+                    )
+                else:
+                    input_data[col_name] = current_col.text_input(
+                        f"Enter value for {col_name}:",
+                        value=str(current_value) if current_value is not None else "",
+                        key=key_for_widget
+                    )
+
+                st.session_state['prediction_inputs'][col_name] = input_data[col_name]
+
+            # ✅ Submit button is now correctly inside the form
+            submit_button = st.form_submit_button("Get Prediction", key="get_prediction_button_final")
+
+            if submit_button:
+                try:
+                    input_df = pd.DataFrame([st.session_state['prediction_inputs']], columns=feature_columns)
+
+                    # Encode categorical variables
+                    for col, le in st.session_state['preprocessor_le_dict'].items():
+                        if col in input_df.columns:
+                            try:
+                                input_df[col] = le.transform(input_df[col].astype(str))
+                            except ValueError as ve:
+                                st.error(f"Unseen category for '{col}': {input_df[col].iloc[0]}. Use known values.")
+                                return
+
+                    # Scale if scaler is available
+                    if 'Scaler' in model_info and model_info['Scaler']:
+                        input_df = model_info['Scaler'].transform(input_df)
+
+                    prediction = model.predict(input_df)
+
+                    if is_classification:
+                        if st.session_state.target_label_encoder:
+                            decoded_prediction = st.session_state.target_label_encoder.inverse_transform(prediction)
+                            st.success(f"Predicted {target_column_name}: **{decoded_prediction[0]}**")
+                        else:
+                            st.success(f"Predicted {target_column_name}: **{prediction[0]}**")
+
+                        if hasattr(model, 'predict_proba'):
+                            probabilities = model.predict_proba(input_df)[0]
+                            class_names = getattr(model, 'classes_', np.arange(len(probabilities)))
+                            prob_df = pd.DataFrame({'Class': class_names, 'Probability': probabilities})
+                            st.dataframe(prob_df.style.format({'Probability': "{:.2%}"}))
+
+                    else:
+                        st.success(f"Predicted {target_column_name}: **{prediction[0]:.2f}**")
+
+                except Exception as e:
+                    st.error(f"Prediction error: {e}")
+                    st.warning("Check for missing values or invalid input types.")
+
+    # 🟢 Call the function so it executes
+    prediction_interface_agent()
