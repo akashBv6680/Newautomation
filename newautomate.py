@@ -777,7 +777,6 @@ The Agentic AutoML AI Team
         # ✅ Prediction Interface Section
         if st.session_state.best_model is not None:
             st.markdown("---")
-            prediction_interface_agent()  # Call the already defined function above
 
     def prediction_interface_agent():
         """
