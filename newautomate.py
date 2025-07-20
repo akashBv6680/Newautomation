@@ -25,6 +25,27 @@ from matplotlib.gridspec import GridSpec
 import xgboost as xgb
 import smtplib
 from email.message import EmailMessage
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+import os
+import pickle
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score
+from imblearn.over_sampling import SMOTE
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.gridspec import GridSpec
+import xgboost as xgb
+import smtplib
+from email.message import EmailMessage
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import time
 
 # === Agent Names ===
 AGENT_NAMES = {
@@ -63,19 +84,52 @@ def ask_agent(prompt, model="mistralai/Mistral-7B-Instruct-v0.1"):
     if response.status_code == 200:
         return response.json()['choices'][0]['message']['content']
     return "Insight generation failed."
+# === Web Scraper using Selenium ===
+def scrape_web_table(url, column_name):
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    driver = webdriver.Chrome(options=options)
+    driver.get(url)
+    time.sleep(3)
+    tables = driver.find_elements(By.TAG_NAME, "table")
+    for table in tables:
+        try:
+            df = pd.read_html(table.get_attribute('outerHTML'))[0]
+            if column_name in df.columns:
+                driver.quit()
+                return df[[column_name]]
+        except:
+            continue
+    driver.quit()
+    return None
 
 # === Ingestion Agent ===
 def ingest_data():
     file_type = st.selectbox("What type of dataset do you have?", ["CSV", "Excel", "JSON", "Web URL"])
-    uploaded_file = st.file_uploader("Upload your dataset", type=["csv", "xlsx", "json"])
-    if uploaded_file:
-        if file_type == "CSV":
-            return pd.read_csv(uploaded_file)
-        elif file_type == "Excel":
-            return pd.read_excel(uploaded_file)
-        elif file_type == "JSON":
-            return pd.read_json(uploaded_file)
+    if file_type == "Web URL":
+        url = st.text_input("Enter the webpage URL")
+        column = st.text_input("Which column do you want to extract from the web table?")
+        if url and column:
+            df = scrape_web_table(url, column)
+            if df is not None:
+                st.success("Web data loaded successfully!")
+                return df
+            else:
+                st.error("Could not find the column in any table on the page.")
+        return None
+    else:
+        uploaded_file = st.file_uploader("Upload your dataset", type=["csv", "xlsx", "json"])
+        if uploaded_file:
+            if file_type == "CSV":
+                return pd.read_csv(uploaded_file)
+            elif file_type == "Excel":
+                return pd.read_excel(uploaded_file)
+            elif file_type == "JSON":
+                return pd.read_json(uploaded_file)
     return None
+
 
 # === Preprocessing Agent ===
 def preprocess_data(df):
