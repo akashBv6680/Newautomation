@@ -752,6 +752,9 @@ The Agentic AutoML AI Team
             # Send final report only if model training completed and not yet sent
             if st.session_state.model_training_completed and client_email and not st.session_state.final_report_sent:
                 model_summary = f"""
+            # Send final report only if model training completed and not yet sent
+            if st.session_state.model_training_completed and client_email and not st.session_state.final_report_sent:
+                model_summary = f"""
 Dear Client,
 
 The AutoML process is complete, and we have identified the best-performing model for your dataset.
@@ -768,12 +771,14 @@ Thank you for using our AI service.
 Regards,
 The Agentic AutoML AI Team
 """
- send_email_report("Final AutoML Model Report", model_summary, client_email)
-st.session_state['final_report_sent'] = True  # Mark as sent
-st.rerun()  # Rerun to remove warning/update display
+                send_email_report("Final AutoML Model Report", model_summary, client_email)
+                st.session_state['final_report_sent'] = True  # Mark as sent
+                st.rerun()  # Rerun to remove warning/update display
 
-if st.session_state.best_model is not None:
-    st.markdown("---")
+        # ✅ Prediction Interface Section
+        if st.session_state.best_model is not None:
+            st.markdown("---")
+            prediction_interface_agent()  # Call the already defined function above
 
     def prediction_interface_agent():
         """
