@@ -39,7 +39,7 @@ AGENT_NAMES = {
 }
 
 # --- Initialize Session State Variables ---
-# This is crucial for controlling execution flow and preserving state across reruns.
+# This ensures variables persist across reruns and are initialized only once.
 if 'df_original' not in st.session_state:
     st.session_state['df_original'] = None
 if 'X_processed' not in st.session_state:
@@ -48,7 +48,9 @@ if 'y_processed' not in st.session_state:
     st.session_state['y_processed'] = None
 if 'target_column_name' not in st.session_state:
     st.session_state['target_column_name'] = None
-if 'preprocessor_le_dict' not in st.session_state: # Stores LabelEncoders for features
+if 'is_classification_task' not in st.session_state: # To store if it's classification or regression
+    st.session_state['is_classification_task'] = None
+if 'preprocessor_le_dict' not in st.session_state: # Stores LabelEncoders for feature columns
     st.session_state['preprocessor_le_dict'] = {}
 if 'target_label_encoder' not in st.session_state: # Stores LabelEncoder for the target
     st.session_state['target_label_encoder'] = None
@@ -56,10 +58,16 @@ if 'best_model' not in st.session_state:
     st.session_state['best_model'] = None
 if 'best_model_info' not in st.session_state: # Stores model info and scaler
     st.session_state['best_model_info'] = None
-if 'model_training_completed' not in st.session_state:
+if 'model_training_completed' not in st.session_state: # Flag to prevent re-training
     st.session_state['model_training_completed'] = False
-if 'together_key_cycler' not in st.session_state:
-    st.session_state.together_key_cycler = None # Initialize to None, set later
+if 'pdf_report_path' not in st.session_state: # Path to the generated PDF report
+    st.session_state['pdf_report_path'] = None
+if 'initial_report_sent' not in st.session_state: # Flag for email sending
+    st.session_state['initial_report_sent'] = False
+if 'final_report_sent' not in st.session_state: # Flag for email sending
+    st.session_state['final_report_sent'] = False
+if 'together_key_cycler' not in st.session_state: # For cycling TogetherAI keys
+    st.session_state.together_key_cycler = None
 
 # === Email Notification ===
 def send_email_report(subject, body, to, attachment_paths=None):
@@ -86,7 +94,7 @@ def send_email_report(subject, body, to, attachment_paths=None):
             smtp.send_message(msg)
         st.success(f"Email report sent to {to}")
     except Exception as e:
-        st.error(f"Failed to send email report: {e}")
+        st.error(f"Failed to send email report: {e}. Check email credentials in .streamlit/secrets.toml")
 
 # === Helper: Ask TogetherAI (for InsightLens AI) ===
 def get_together_api_key_cycler():
@@ -106,7 +114,7 @@ def get_together_api_key_cycler():
 
     return itertools.cycle(keys)
 
-# Initialize the key cycler once
+# Initialize the key cycler once at the start of the app's lifetime
 if st.session_state.together_key_cycler is None:
     st.session_state.together_key_cycler = get_together_api_key_cycler()
 
@@ -183,207 +191,250 @@ def scrape_web_table(url, column_name):
         return None
 
 # === Ingestion Agent ===
-def ingest_data():
+def ingest_data_agent():
     """
     Handles data ingestion from various sources (CSV, Excel, JSON, Web URL).
+    This function directly updates st.session_state.
     """
     st.subheader(f"🌐 {AGENT_NAMES['ingestion']}: Data Ingestion")
-    file_type = st.selectbox("What type of dataset do you have?", ["CSV", "Excel", "JSON", "Web URL"], key="file_type_select")
+    file_type = st.selectbox("What type of dataset do you have?", ["CSV", "Excel", "JSON", "Web URL"], key="file_type_select_ingest")
 
-    df = None
+    df_loaded = None
     if file_type == "Web URL":
-        url = st.text_input("Enter the webpage URL", key="web_url_input")
-        column = st.text_input("Which column do you want to extract from the web table?", key="web_column_input")
+        url = st.text_input("Enter the webpage URL", key="web_url_input_ingest")
+        column = st.text_input("Which column do you want to extract from the web table?", key="web_column_input_ingest")
         if url and column:
-            if st.button("Scrape Data", key="scrape_button"):
+            if st.button("Scrape Data", key="scrape_button_ingest"):
                 with st.spinner(f"Scraping data from {url}... This might take a moment."):
-                    df = scrape_web_table(url, column)
-                    if df is not None:
+                    df_loaded = scrape_web_table(url, column)
+                    if df_loaded is not None:
                         st.write("First 5 rows of scraped data:")
-                        st.dataframe(df.head())
-                        st.session_state['df_original'] = df # Store it in session state
-                        st.session_state['model_training_completed'] = False # Reset state
+                        st.dataframe(df_loaded.head())
     else:
-        uploaded_file = st.file_uploader("Upload your dataset", type=["csv", "xlsx", "json"])
+        uploaded_file = st.file_uploader("Upload your dataset", type=["csv", "xlsx", "json"], key="file_uploader_ingest")
         if uploaded_file:
             try:
                 if file_type == "CSV":
-                    df = pd.read_csv(uploaded_file)
+                    df_loaded = pd.read_csv(uploaded_file)
                 elif file_type == "Excel":
-                    df = pd.read_excel(uploaded_file)
+                    df_loaded = pd.read_excel(uploaded_file)
                 elif file_type == "JSON":
-                    df = pd.read_json(uploaded_file)
+                    df_loaded = pd.read_json(uploaded_file)
                 st.success("File uploaded successfully!")
                 st.write("First 5 rows of your dataset:")
-                st.dataframe(df.head())
-                st.session_state['df_original'] = df # Store it in session state
-                st.session_state['model_training_completed'] = False # Reset state
+                st.dataframe(df_loaded.head())
             except Exception as e:
                 st.error(f"Error reading the file: {e}. Please check the file format.")
-    return df
+
+    # Only update session state if a new df_loaded is actually present and different
+    if df_loaded is not None and (st.session_state.df_original is None or not st.session_state.df_original.equals(df_loaded)):
+        st.session_state['df_original'] = df_loaded
+        # Reset subsequent stages when new data is ingested
+        st.session_state['X_processed'] = None
+        st.session_state['y_processed'] = None
+        st.session_state['best_model'] = None
+        st.session_state['best_model_info'] = None
+        st.session_state['model_training_completed'] = False
+        st.session_state['pdf_report_path'] = None
+        st.session_state['initial_report_sent'] = False
+        st.session_state['final_report_sent'] = False
+        st.rerun() # Force a rerun to clean the slate and proceed to next step with new data
 
 
 # === Preprocessing Agent ===
-def preprocess_data(df):
+def preprocess_data_agent():
     """
     Handles data preprocessing: missing values, encoding, and imbalance handling.
+    This function directly updates st.session_state.
     """
     st.subheader(f"🧹 {AGENT_NAMES['preprocess']}: Data Preprocessing")
     st.write("Inferring target variable and performing basic preprocessing...")
 
+    df = st.session_state.df_original
     if df is None or df.empty:
-        st.error("Cannot preprocess an empty DataFrame. Please ingest data first.")
-        return None, None, None
+        st.error("Cannot preprocess: No data ingested yet. Please go back to Data Ingestion.")
+        return
 
-    # Let the user select the target column
-    target_col = st.selectbox("Which column is your target variable?", df.columns, key="target_col_select")
+    # Use a unique key for selectbox to prevent rerun issues
+    target_col = st.selectbox("Which column is your target variable?", df.columns, key="target_col_select_preprocess")
 
-    y = df[target_col].copy() # Use .copy() to avoid SettingWithCopyWarning
-    X = df.drop(columns=[target_col]).copy()
+    if st.button("Run Preprocessing", key="run_preprocess_button"):
+        with st.spinner("Preprocessing data..."):
+            try:
+                y = df[target_col].copy()
+                X = df.drop(columns=[target_col]).copy()
 
-    # Handle missing values
-    st.info("Handling missing values (forward fill for now, more advanced options could be added)...")
-    X.fillna(method='ffill', inplace=True)
-    y.fillna(method='ffill', inplace=True) # Important if target has missing values
+                # Handle missing values
+                st.info("Handling missing values (forward fill for now)...")
+                X.fillna(method='ffill', inplace=True)
+                y.fillna(method='ffill', inplace=True)
 
-    # Encode categorical features in X
-    st.info("Encoding categorical features...")
-    current_le_dict = {} # Dictionary to store LabelEncoders for feature columns
-    for col in X.select_dtypes(include='object').columns:
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col].astype(str)) # Ensure string conversion
-        current_le_dict[col] = le
-    st.session_state['preprocessor_le_dict'] = current_le_dict # Store the encoders
+                # Encode categorical features in X
+                st.info("Encoding categorical features...")
+                current_le_dict = {}
+                for col in X.select_dtypes(include='object').columns:
+                    le = LabelEncoder()
+                    X[col] = le.fit_transform(X[col].astype(str))
+                    current_le_dict[col] = le
+                st.session_state['preprocessor_le_dict'] = current_le_dict
 
-    # Encode target variable if it's categorical
-    is_classification = False
-    if y.dtype == 'object' or (y.nunique() <= 20 and y.dtype not in ['int64', 'float64']): # Heuristic
-        st.info("Target variable appears categorical. Applying Label Encoding to target.")
-        le_target = LabelEncoder()
-        y = le_target.fit_transform(y.astype(str))
-        st.session_state['target_label_encoder'] = le_target # Store for later inverse transform if needed
-        is_classification = True
-    else:
-        st.info("Target variable appears numerical. No encoding applied to target.")
-        is_classification = False # Explicitly set for regression
+                # Encode target variable if it's categorical
+                is_classification = False
+                if y.dtype == 'object' or (y.nunique() <= 20 and y.dtype not in ['int64', 'float64']):
+                    st.info("Target variable appears categorical. Applying Label Encoding to target.")
+                    le_target = LabelEncoder()
+                    y = le_target.fit_transform(y.astype(str))
+                    st.session_state['target_label_encoder'] = le_target
+                    is_classification = True
+                else:
+                    st.info("Target variable appears numerical. No encoding applied to target.")
+                    is_classification = False
 
-    # Handle class imbalance for classification tasks
-    if is_classification:
-        unique_classes, counts = np.unique(y, return_counts=True)
-        if len(unique_classes) > 1:
-            min_class_count = counts.min()
-            max_class_count = counts.max()
-            # Adjusted threshold for imbalance, you can tune this
-            if min_class_count / max_class_count < 0.3:
-                st.warning(f"Target class is imbalanced (Min count: {min_class_count}, Max count: {max_class_count}). Applying SMOTE...")
-                try:
-                    sm = SMOTE(random_state=42)
-                    X_resampled, y_resampled = sm.fit_resample(X, y)
-                    X, y = X_resampled, y_resampled
-                    st.success(f"SMOTE applied. New class counts: {np.bincount(y)}")
-                except ValueError as e:
-                    st.warning(f"SMOTE could not be applied: {e}. This might happen if there's only one sample in a class after encoding or if all features are categorical and not enough samples.")
-            else:
-                st.info("Target class is reasonably balanced. No SMOTE applied.")
-        else:
-            st.warning("Only one unique class found in target. SMOTE not applicable.")
-    else:
-        st.info("Target variable is numerical (regression task). SMOTE not applicable.")
+                # Handle class imbalance for classification tasks
+                if is_classification:
+                    unique_classes, counts = np.unique(y, return_counts=True)
+                    if len(unique_classes) > 1:
+                        min_class_count = counts.min()
+                        max_class_count = counts.max()
+                        if min_class_count / max_class_count < 0.3:
+                            st.warning(f"Target class is imbalanced (Min count: {min_class_count}, Max count: {max_class_count}). Applying SMOTE...")
+                            try:
+                                sm = SMOTE(random_state=42)
+                                X_resampled, y_resampled = sm.fit_resample(X, y)
+                                X, y = X_resampled, y_resampled
+                                st.success(f"SMOTE applied. New class counts: {np.bincount(y)}")
+                            except ValueError as e:
+                                st.warning(f"SMOTE could not be applied: {e}. This might happen if there's only one sample in a class or insufficient features after encoding.")
+                        else:
+                            st.info("Target class is reasonably balanced. No SMOTE applied.")
+                    else:
+                        st.warning("Only one unique class found in target. SMOTE not applicable.")
+                else:
+                    st.info("Target variable is numerical (regression task). SMOTE not applicable.")
 
-    st.success("Preprocessing complete!")
-    st.write("Processed data (first 5 rows of features):")
-    st.dataframe(X.head())
-    st.write("Processed target (first 5 values):")
-    st.write(y[:5])
-    return X, y, target_col, is_classification
+                st.success("Preprocessing complete!")
+                st.write("Processed data (first 5 rows of features):")
+                st.dataframe(X.head())
+                st.write("Processed target (first 5 values):")
+                st.write(y[:5])
+
+                st.session_state['X_processed'] = X
+                st.session_state['y_processed'] = y
+                st.session_state['target_column_name'] = target_col
+                st.session_state['is_classification_task'] = is_classification
+                # Reset model training state as preprocessing has changed data
+                st.session_state['best_model'] = None
+                st.session_state['best_model_info'] = None
+                st.session_state['model_training_completed'] = False
+                st.session_state['final_report_sent'] = False # Reset final report flag
+                st.rerun() # Force rerun to update subsequent stages
+
+            except Exception as e:
+                st.error(f"Error during preprocessing: {e}")
+                st.session_state['X_processed'] = None
+                st.session_state['y_processed'] = None
+                st.session_state['best_model'] = None
+                st.session_state['best_model_info'] = None
+                st.session_state['model_training_completed'] = False
+
+    elif st.session_state.X_processed is not None and st.session_state.y_processed is not None:
+        st.info("Data already preprocessed. Click 'Run Preprocessing' if you want to re-run.")
+        st.write("Processed data (first 5 rows of features):")
+        st.dataframe(st.session_state.X_processed.head())
+        st.write("Processed target (first 5 values):")
+        st.write(st.session_state.y_processed[:5])
+
 
 # === Visualization Agent ===
-def visualize_and_insight(df_original):
+def visualize_and_insight_agent():
     """
     Generates visualizations and AI-driven insights, saving them to a PDF.
+    This function uses st.session_state.df_original and updates st.session_state.pdf_report_path.
     """
-    pdf_path = "eda_report.pdf"
     st.subheader(f"📊 {AGENT_NAMES['visualize']}: Visual Insights")
-    st.info("Generating visual insights and explanations... This might take a moment.")
+    df_original = st.session_state.df_original
 
     if df_original is None or df_original.empty:
-        st.warning("No data available for visualization.")
-        return None
+        st.warning("No data available for visualization. Please ingest data first.")
+        return
 
-    try:
-        with PdfPages(pdf_path) as pdf:
-            # Create a copy for plotting to avoid any in-place changes by plotting libraries
-            df_plot = df_original.copy()
+    # Trigger visualization if no report exists or explicit button click
+    if st.session_state.pdf_report_path is None or st.button("Generate Visual Report", key="generate_visual_report_button"):
+        st.info("Generating visual insights and explanations... This might take a moment.")
+        pdf_path = "eda_report.pdf" # Define path here
+        try:
+            with PdfPages(pdf_path) as pdf:
+                df_plot = df_original.copy()
+                cat_cols = df_plot.select_dtypes(include='object').columns
+                num_cols = df_plot.select_dtypes(include=np.number).columns
 
-            cat_cols = df_plot.select_dtypes(include='object').columns
-            num_cols = df_plot.select_dtypes(include=np.number).columns
+                fig_overview = plt.figure(figsize=(10, 2))
+                gs_overview = GridSpec(1, 1)
+                ax_overview = fig_overview.add_subplot(gs_overview[0])
+                ax_overview.axis('off')
+                ax_overview.text(0.05, 0.9, f"Dataset Overview:", fontsize=14, weight='bold')
+                ax_overview.text(0.05, 0.7, f"Shape: {df_plot.shape[0]} rows, {df_plot.shape[1]} columns", fontsize=12)
+                ax_overview.text(0.05, 0.5, f"Numerical Columns: {len(num_cols)}", fontsize=12)
+                ax_overview.text(0.05, 0.3, f"Categorical Columns: {len(cat_cols)}", fontsize=12)
+                pdf.savefig(fig_overview)
+                plt.close(fig_overview)
 
-            # Overview of the dataset
-            fig_overview = plt.figure(figsize=(10, 2))
-            gs_overview = GridSpec(1, 1)
-            ax_overview = fig_overview.add_subplot(gs_overview[0])
-            ax_overview.axis('off')
-            ax_overview.text(0.05, 0.9, f"Dataset Overview:", fontsize=14, weight='bold')
-            ax_overview.text(0.05, 0.7, f"Shape: {df_plot.shape[0]} rows, {df_plot.shape[1]} columns", fontsize=12)
-            ax_overview.text(0.05, 0.5, f"Numerical Columns: {len(num_cols)}", fontsize=12)
-            ax_overview.text(0.05, 0.3, f"Categorical Columns: {len(cat_cols)}", fontsize=12)
-            pdf.savefig(fig_overview)
-            plt.close(fig_overview)
+                for col in num_cols:
+                    fig = plt.figure(figsize=(11, 5))
+                    gs = GridSpec(1, 2, width_ratios=[2, 1])
+                    ax1 = fig.add_subplot(gs[0])
+                    df_plot[col].hist(ax=ax1, bins=20, color='skyblue', edgecolor='black')
+                    ax1.set_title(f"Histogram of {col}", fontsize=14)
+                    ax1.set_xlabel(col)
+                    ax1.set_ylabel("Frequency")
+                    ax1.grid(axis='y', alpha=0.75)
+                    ax2 = fig.add_subplot(gs[1])
+                    ax2.axis('off')
+                    ax2.set_title("AI Insights", fontsize=14, weight='bold')
+                    prompt = f"Given a histogram of the numerical column '{col}', describe its distribution (e.g., normal, skewed, multimodal) and what that implies for business clients. Provide 3 short, concise bullet points targeted at non-technical business clients. Focus on actionable insights or key observations about the data's spread."
+                    raw_insights = ask_agent(prompt)
+                    points = '\n'.join([f"• {line.strip()}" for line in raw_insights.strip().split('\n') if line.strip()])
+                    ax2.text(0, 1, points, wrap=True, fontsize=10, verticalalignment='top', transform=ax2.transAxes)
+                    pdf.savefig(fig, bbox_inches='tight')
+                    st.pyplot(fig)
+                    plt.close(fig)
 
-            # Numerical columns histograms and insights
-            for col in num_cols:
-                fig = plt.figure(figsize=(11, 5))
-                gs = GridSpec(1, 2, width_ratios=[2, 1])
-                ax1 = fig.add_subplot(gs[0])
-                df_plot[col].hist(ax=ax1, bins=20, color='skyblue', edgecolor='black')
-                ax1.set_title(f"Histogram of {col}", fontsize=14)
-                ax1.set_xlabel(col)
-                ax1.set_ylabel("Frequency")
-                ax1.grid(axis='y', alpha=0.75)
-
-                ax2 = fig.add_subplot(gs[1])
-                ax2.axis('off') # Turn off axes for text
-                ax2.set_title("AI Insights", fontsize=14, weight='bold')
-
-                prompt = f"Given a histogram of the numerical column '{col}', describe its distribution (e.g., normal, skewed, multimodal) and what that implies for business clients. Provide 3 short, concise bullet points targeted at non-technical business clients. Focus on actionable insights or key observations about the data's spread."
-                raw_insights = ask_agent(prompt)
-                points = '\n'.join([f"• {line.strip()}" for line in raw_insights.strip().split('\n') if line.strip()])
-                ax2.text(0, 1, points, wrap=True, fontsize=10, verticalalignment='top', transform=ax2.transAxes)
-
-                pdf.savefig(fig, bbox_inches='tight') # bbox_inches='tight' prevents labels from being cut off
-                st.pyplot(fig)
-                plt.close(fig)
-
-            # Categorical columns bar charts and insights
-            for col in cat_cols:
-                fig = plt.figure(figsize=(11, 5))
-                gs = GridSpec(1, 2, width_ratios=[2, 1])
-                ax1 = fig.add_subplot(gs[0])
-                df_plot[col].value_counts().plot(kind='bar', ax=ax1, color='orange', edgecolor='black')
-                ax1.set_title(f"Bar Chart of {col}", fontsize=14)
-                ax1.set_xlabel(col)
-                ax1.set_ylabel("Count")
-                plt.xticks(rotation=45, ha='right') # Rotate labels for readability
-                ax1.grid(axis='y', alpha=0.75)
-
-                ax2 = fig.add_subplot(gs[1])
-                ax2.axis('off')
-                ax2.set_title("AI Insights", fontsize=14, weight='bold')
-
-                prompt = f"Given a bar chart of the categorical column '{col}', describe the key categories and their relative frequencies. What does this tell us about the data in terms of customer segments or popular choices? Provide 3 short, concise bullet points targeted at non-technical business clients."
-                raw_insights = ask_agent(prompt)
-                points = '\n'.join([f"• {line.strip()}" for line in raw_insights.strip().split('\n') if line.strip()])
-                ax2.text(0, 1, points, wrap=True, fontsize=10, verticalalignment='top', transform=ax2.transAxes)
-
-                pdf.savefig(fig, bbox_inches='tight')
-                st.pyplot(fig)
-                plt.close(fig)
+                for col in cat_cols:
+                    fig = plt.figure(figsize=(11, 5))
+                    gs = GridSpec(1, 2, width_ratios=[2, 1])
+                    ax1 = fig.add_subplot(gs[0])
+                    df_plot[col].value_counts().plot(kind='bar', ax=ax1, color='orange', edgecolor='black')
+                    ax1.set_title(f"Bar Chart of {col}", fontsize=14)
+                    ax1.set_xlabel(col)
+                    ax1.set_ylabel("Count")
+                    plt.xticks(rotation=45, ha='right')
+                    ax1.grid(axis='y', alpha=0.75)
+                    ax2 = fig.add_subplot(gs[1])
+                    ax2.axis('off')
+                    ax2.set_title("AI Insights", fontsize=14, weight='bold')
+                    prompt = f"Given a bar chart of the categorical column '{col}', describe the key categories and their relative frequencies. What does this tell us about the data in terms of customer segments or popular choices? Provide 3 short, concise bullet points targeted at non-technical business clients."
+                    raw_insights = ask_agent(prompt)
+                    points = '\n'.join([f"• {line.strip()}" for line in raw_insights.strip().split('\n') if line.strip()])
+                    ax2.text(0, 1, points, wrap=True, fontsize=10, verticalalignment='top', transform=ax2.transAxes)
+                    pdf.savefig(fig, bbox_inches='tight')
+                    st.pyplot(fig)
+                    plt.close(fig)
 
             st.success("Visual insights generated and saved to PDF!")
-            return pdf_path
-    except Exception as e:
-        st.error(f"Error during visualization: {e}")
-        return None
+            st.session_state['pdf_report_path'] = pdf_path # Store path in session state
+            st.session_state['initial_report_sent'] = False # Reset email flag, as new report generated
+            st.rerun() # Force rerun to show download button and possibly send email
+        except Exception as e:
+            st.error(f"Error during visualization generation: {e}")
+            st.session_state['pdf_report_path'] = None
+            st.session_state['initial_report_sent'] = False
+
+    elif st.session_state.pdf_report_path is not None:
+        st.info("Visual report already generated. Download below or click 'Generate Visual Report' to regenerate.")
+
+    if st.session_state.pdf_report_path and os.path.exists(st.session_state.pdf_report_path):
+        with open(st.session_state.pdf_report_path, "rb") as f:
+            st.download_button("📥 Download Visual Report", f, file_name="Insights_Report.pdf", use_container_width=True, key="download_visual_report")
 
 
 # === Model Runner with Multiple Test Sizes ===
@@ -435,9 +486,10 @@ class ModelRunner:
         total_runs = len([0.1, 0.2, 0.25, 0.3]) * len(self.models)
         run_count = 0
 
-        # Fit the scaler once on the full dataset (or train set if careful about data leakage)
-        # For simplicity here, fitting on full X for consistent scaling for prediction
-        # In a real pipeline, you'd fit on X_train only and transform X_test
+        # Fit the scaler once on the full dataset (for consistent transformation for prediction)
+        # For rigorous ML, fit on X_train only and transform train/test.
+        # Here, for simplicity in a multi-stage app where X might be changed by SMOTE,
+        # we fit on the final X_processed for consistent prediction scaling.
         self.scaler.fit(self.X)
 
         for size in [0.1, 0.2, 0.25, 0.3]:
@@ -467,7 +519,7 @@ class ModelRunner:
                     y_pred = model.predict(current_X_test)
 
                     score = self.metric_func(y_test, y_pred)
-                    st.write(f"Model: {model_name}, Test Size: {int(size*100)}%, {self.metric_name}: {score:.4f}")
+                    # st.write(f"Model: {model_name}, Test Size: {int(size*100)}%, {self.metric_name}: {score:.4f}") # Too much output
 
                     if score > best_score:
                         best_score = score
@@ -500,59 +552,58 @@ class ModelRunner:
                     'scaler': self.scaler,
                     'info': self.best_info,
                     'is_classification': self.is_classification,
-                    'target_label_encoder': st.session_state.get('target_label_encoder', None)
+                    'target_label_encoder': st.session_state.get('target_label_encoder', None),
+                    'preprocessor_le_dict': st.session_state.get('preprocessor_le_dict', {})
                 }
                 with open(filename, "wb") as f:
                     pickle.dump(model_package, f)
-                st.success(f"Best model and scaler saved as '{filename}'")
+                st.success(f"Best model and associated preprocessors saved as '{filename}'")
             except Exception as e:
                 st.error(f"Failed to save the best model: {e}")
         else:
             st.warning("No best model found to save.")
 
 # === Prediction Interface ===
-def prediction_interface():
+def prediction_interface_agent():
     """
     Provides a simple interface for making predictions with the trained model.
-    Allows manual input for a single prediction or uses existing data.
+    Uses st.session_state to retrieve model and data.
     """
     st.subheader(f"🔮 {AGENT_NAMES['predict']}: Prediction Interface")
 
     if st.session_state.best_model is None:
-        st.warning("No model has been trained yet. Please complete previous steps.")
+        st.warning("No model has been trained yet. Please complete model training.")
         return
 
     model = st.session_state.best_model
     model_info = st.session_state.best_model_info
     target_column_name = st.session_state.target_column_name
     X_sample_data = st.session_state.X_processed # Use processed X for feature names and types
-    is_classification = model_info['Type'] == 'Classification'
+    is_classification = st.session_state.is_classification_task # Use stored classification flag
 
     st.write("Enter values for features to get a prediction:")
 
-    # Use st.form to group inputs and prevent reruns on every character
+    # Use st.form to group inputs and prevent reruns on every character entry
     with st.form("prediction_form"):
         input_data = {}
         st.write("Input values for prediction:")
 
-        # Get the feature names
-        feature_columns = X_sample_data.columns
+        feature_columns = X_sample_data.columns # Ensure we get columns from processed X
 
-        # Create input widgets dynamically in columns
         num_cols_per_row = 2
         cols = st.columns(num_cols_per_row)
         for i, col_name in enumerate(feature_columns):
             current_col = cols[i % num_cols_per_row]
-            sample_value = X_sample_data[col_name].iloc[0]
+            # Try to get a sample value to infer type for the widget
+            sample_value = X_sample_data[col_name].iloc[0] if not X_sample_data.empty else 0 # Default if X_sample_data is empty
 
-            if pd.api.types.is_numeric_dtype(sample_value):
-                # Use type coercion for number_input
-                input_data[col_name] = current_col.number_input(f"Enter value for {col_name}:", value=float(sample_value), key=f"input_{col_name}")
-            else:
-                # This case should be rare if preprocessing converts all object dtypes
-                input_data[col_name] = current_col.text_input(f"Enter value for {col_name}:", value=str(sample_value), key=f"input_{col_name}")
+            if pd.api.types.is_numeric_dtype(type(sample_value)) or pd.api.types.is_numeric_dtype(X_sample_data[col_name].dtype):
+                input_data[col_name] = current_col.number_input(f"Enter value for {col_name}:", value=float(sample_value), key=f"pred_input_num_{col_name}")
+            else: # This should ideally not happen if preprocessing converts everything
+                input_data[col_name] = current_col.text_input(f"Enter value for {col_name}:", value=str(sample_value), key=f"pred_input_txt_{col_name}")
 
-        submit_button = st.form_submit_button("Get Prediction")
+
+        submit_button = st.form_submit_button("Get Prediction", key="get_prediction_button")
 
         if submit_button:
             try:
@@ -562,19 +613,20 @@ def prediction_interface():
                 # Apply LabelEncoders for feature columns that were originally categorical
                 # Use the stored preprocessor_le_dict from session state
                 for col, le in st.session_state['preprocessor_le_dict'].items():
-                    if col in input_df.columns and input_df[col].dtype == 'object': # Check if it's still object (might be if user input)
-                        # Ensure the input value is known to the encoder, or handle new values
-                        # For simplicity, if a value is new, it will raise an error.
-                        # In production, you might map unknown values to a specific placeholder or average.
+                    if col in input_df.columns:
+                        # Attempt to transform. If a new category, it will fail.
+                        # For robustness, handle unseen categories (e.g., set to mode, or encode as -1)
+                        # Here, we assume the input must be a known category.
                         try:
+                            # Ensure the column in input_df is treated as object for LabelEncoder
                             input_df[col] = le.transform(input_df[col].astype(str))
                         except ValueError as ve:
-                            st.error(f"Input error for categorical column '{col}': {ve}. Value might be new/unseen during training.")
-                            return
+                            st.error(f"Input error for categorical column '{col}': '{input_df[col].iloc[0]}' is an unseen category. Please enter a value from the original dataset categories.")
+                            return # Stop prediction if unknown category
 
                 # Apply scaling using the scaler stored with the best model
                 scaled_input_data = input_df
-                if model_info['Scaler'] is not None:
+                if 'Scaler' in model_info and model_info['Scaler'] is not None:
                     scaler = model_info['Scaler']
                     scaled_input_data = scaler.transform(input_df)
 
@@ -592,8 +644,7 @@ def prediction_interface():
                     if hasattr(model, 'predict_proba'):
                         probabilities = model.predict_proba(scaled_input_data)[0]
                         st.write("Class Probabilities:")
-                        # Ensure class names are available for display
-                        class_names = getattr(model, 'classes_', range(len(probabilities)))
+                        class_names = getattr(model, 'classes_', np.unique(st.session_state.y_processed)) # Fallback if model.classes_ isn't set
                         prob_df = pd.DataFrame({'Class': class_names, 'Probability': probabilities})
                         st.dataframe(prob_df.style.format({'Probability': "{:.2%}"}))
 
@@ -605,7 +656,7 @@ def prediction_interface():
                 st.warning("Common issues: New categorical values, incorrect numeric formats, or missing feature inputs.")
 
 
-# === App Runner ===
+# === Main Streamlit App Execution Flow ===
 st.set_page_config(page_title="Agentic AutoML AI", layout="wide", initial_sidebar_state="expanded")
 st.title("🤖 Multi-Agent AutoML System")
 st.markdown("---")
@@ -613,7 +664,7 @@ st.markdown("---")
 # Client email input in the sidebar
 with st.sidebar:
     st.header("Client Communication")
-    client_email = st.text_input("Enter Client Email for Reports", help="Reports will be sent to this email address.", key="client_email_input")
+    client_email = st.text_input("Enter Client Email for Reports", help="Reports will be sent to this email address.", key="client_email_sidebar_input")
     if not client_email:
         st.warning("Please enter a client email to receive automated reports.")
 
@@ -622,53 +673,33 @@ st.sidebar.header("System Status")
 
 # --- Agent 1: Ingestion ---
 st.sidebar.write(f"**{AGENT_NAMES['ingestion']} Status:**")
-# Call ingest_data which will update st.session_state['df_original']
-ingest_data()
+ingest_data_agent() # This function handles state updates and potential reruns
 if st.session_state.df_original is not None and not st.session_state.df_original.empty:
     st.sidebar.success("Data ingested successfully!")
 else:
     st.sidebar.warning("Waiting for data ingestion...")
 
 
+# --- Conditional Flow based on State ---
 if st.session_state.df_original is not None:
     st.markdown("---")
     # --- Agent 2: Preprocessing ---
     st.sidebar.write(f"**{AGENT_NAMES['preprocess']} Status:**")
-    # Only run preprocessing if data is new or not yet processed
-    if st.session_state.X_processed is None or st.button("Re-run Preprocessing", key="rerun_preprocess_button"):
-        X, y, target_col, is_classification = preprocess_data(st.session_state.df_original.copy())
-        if X is not None and y is not None:
-            st.sidebar.success("Data preprocessing complete!")
-            st.session_state['X_processed'] = X
-            st.session_state['y_processed'] = y
-            st.session_state['target_column_name'] = target_col
-            st.session_state['is_classification_task'] = is_classification # Store classification type
-            st.session_state['model_training_completed'] = False # Reset model training status
-        else:
-            st.sidebar.warning("Preprocessing failed or not yet started.")
+    preprocess_data_agent() # Handles state updates and rerun for preprocessing
+    if st.session_state.X_processed is not None and st.session_state.y_processed is not None:
+        st.sidebar.success("Data preprocessing complete!")
     else:
-        st.sidebar.info("Data already preprocessed. Click 'Re-run Preprocessing' if you made changes.")
-
+        st.sidebar.warning("Preprocessing failed or not yet completed.")
 
     if st.session_state.X_processed is not None and st.session_state.y_processed is not None:
         st.markdown("---")
         # --- Agent 3: Visualization ---
         st.sidebar.write(f"**{AGENT_NAMES['visualize']} Status:**")
-        # Only re-generate visuals if original DF changes or if forced
-        if 'pdf_report_path' not in st.session_state or st.button("Re-generate Visuals", key="regen_visuals_button"):
-            pdf_path = visualize_and_insight(st.session_state.df_original)
-            if pdf_path:
-                st.sidebar.success("Visual insights generated!")
-                st.session_state['pdf_report_path'] = pdf_path
-            else:
-                st.sidebar.warning("Visual insights generation failed.")
+        visualize_and_insight_agent() # Handles state updates and rerun for visualization
 
-        if 'pdf_report_path' in st.session_state and st.session_state['pdf_report_path']:
-            with open(st.session_state['pdf_report_path'], "rb") as f:
-                st.download_button("📥 Download Visual Report", f, file_name="Insights_Report.pdf", use_container_width=True, key="download_visual_report")
-
-            if client_email and 'initial_report_sent' not in st.session_state:
-                eda_summary = f"""
+        # Send initial report only if generated and not yet sent
+        if st.session_state.pdf_report_path and client_email and not st.session_state.initial_report_sent:
+            eda_summary = f"""
 Dear Client,
 
 Our system has completed the initial analysis of your dataset. Please find the attached visual insights report for your review.
@@ -685,19 +716,19 @@ Please confirm if you'd like us to proceed with advanced data cleaning and model
 Regards,
 The Agentic AutoML AI Team
 """
-                send_email_report("Initial Data Quality & Visual Report", eda_summary, client_email, [st.session_state['pdf_report_path']])
-                st.warning("Initial report emailed to client for confirmation before continuing.")
-                st.session_state['initial_report_sent'] = True # Mark as sent
+            send_email_report("Initial Data Quality & Visual Report", eda_summary, client_email, [st.session_state.pdf_report_path])
+            st.session_state['initial_report_sent'] = True # Mark as sent to prevent re-sending
+            st.rerun() # Rerun to remove warning of email sending
 
         # Client confirmation to proceed for model training
-        proceed = st.checkbox("✅ Client confirmed. Proceed with model training?", key="client_proceed_checkbox")
+        proceed_with_training = st.checkbox("✅ Client confirmed. Proceed with model training?", key="client_proceed_checkbox_main")
 
-        if proceed:
+        if proceed_with_training:
             st.markdown("---")
             # --- Agent 4: Model Training ---
             st.sidebar.write(f"**{AGENT_NAMES['model']} Status:**")
 
-            # Only run model training if it hasn't been completed yet for the current data
+            # Only run model training if it hasn't been completed for the current processed data
             if not st.session_state.model_training_completed:
                 st.info("Starting model training and selection...")
                 model_runner = ModelRunner(st.session_state.X_processed, st.session_state.y_processed, st.session_state.is_classification_task)
@@ -705,32 +736,12 @@ The Agentic AutoML AI Team
                 if best_model:
                     st.sidebar.success("Model training complete!")
                     st.success(f"Best Model: **{best_info['Model']}** | Score: **{best_info['Score']:.4f}** | Type: **{best_info['Type']}** | Test Size: **{best_info['Test Size']}**")
-                    model_runner.save_best_model("best_model.pkl")
+                    model_runner.save_best_model("best_model.pkl") # Save model and scaler
                     st.session_state['best_model'] = best_model
                     st.session_state['best_model_info'] = best_info
                     st.session_state['model_training_completed'] = True # Mark as completed
-
-                    if client_email and 'final_report_sent' not in st.session_state:
-                        model_summary = f"""
-Dear Client,
-
-The AutoML process is complete, and we have identified the best-performing model for your dataset.
-
-Here are the details of the selected model:
-- **Best Model**: {best_info['Model']}
-- **Performance Score ({best_info['Type']})**: {best_info['Score']:.4f}
-- **Data Split (Test Size)**: {best_info['Test Size']}
-
-This model is now ready for predictions.
-
-Thank for using our AI service.
-
-Regards,
-The Agentic AutoML AI Team
-"""
-                        send_email_report("Final AutoML Model Report", model_summary, client_email)
-                        st.info("📬 Final report emailed to client.")
-                        st.session_state['final_report_sent'] = True
+                    st.session_state['final_report_sent'] = False # Reset final email flag for new training
+                    st.rerun() # Rerun to update state and show prediction interface
                 else:
                     st.sidebar.warning("Model training failed or no best model found.")
                     st.session_state['model_training_completed'] = False # Ensure false if failed
@@ -739,11 +750,34 @@ The Agentic AutoML AI Team
                 st.info("Model training already completed. Details:")
                 st.write(f"Best Model: **{st.session_state.best_model_info['Model']}** | Score: **{st.session_state.best_model_info['Score']:.4f}** | Type: **{st.session_state.best_model_info['Type']}** | Test Size: **{st.session_state.best_model_info['Test Size']}**")
 
+            # Send final report only if model training completed and not yet sent
+            if st.session_state.model_training_completed and client_email and not st.session_state.final_report_sent:
+                model_summary = f"""
+Dear Client,
+
+The AutoML process is complete, and we have identified the best-performing model for your dataset.
+
+Here are the details of the selected model:
+- **Best Model**: {st.session_state.best_model_info['Model']}
+- **Performance Score ({st.session_state.best_model_info['Type']})**: {st.session_state.best_model_info['Score']:.4f}
+- **Data Split (Test Size)**: {st.session_state.best_model_info['Test Size']}
+
+This model is now ready for predictions.
+
+Thank you for using our AI service.
+
+Regards,
+The Agentic AutoML AI Team
+"""
+                send_email_report("Final AutoML Model Report", model_summary, client_email)
+                st.session_state['final_report_sent'] = True # Mark as sent
+                st.rerun() # Rerun to remove warning of email sending
+
             if st.session_state.best_model is not None:
                 st.markdown("---")
                 # --- Agent 5: Prediction Interface ---
                 st.sidebar.write(f"**{AGENT_NAMES['predict']} Status:**")
-                prediction_interface() # Call prediction_interface without passing args, it uses session_state
+                prediction_interface_agent() # Call prediction_interface_agent (no args needed, uses session_state)
                 st.sidebar.info("Prediction interface ready.")
             else:
                 st.sidebar.warning("Prediction interface not available: No model trained.")
