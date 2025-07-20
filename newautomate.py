@@ -487,9 +487,6 @@ class ModelRunner:
         run_count = 0
 
         # Fit the scaler once on the full dataset (for consistent transformation for prediction)
-        # For rigorous ML, fit on X_train only and transform train/test.
-        # Here, for simplicity in a multi-stage app where X might be changed by SMOTE,
-        # we fit on the final X_processed for consistent prediction scaling.
         self.scaler.fit(self.X)
 
         for size in [0.1, 0.2, 0.25, 0.3]:
@@ -578,8 +575,12 @@ def prediction_interface_agent():
     model = st.session_state.best_model
     model_info = st.session_state.best_model_info
     target_column_name = st.session_state.target_column_name
-    X_sample_data = st.session_state.X_processed # Use processed X for feature names and types
-    is_classification = st.session_state.is_classification_task # Use stored classification flag
+    X_sample_data = st.session_state.X_processed
+    is_classification = st.session_state.is_classification_task
+
+    if X_sample_data is None or X_sample_data.empty or not hasattr(X_sample_data, 'columns'):
+        st.warning("Processed feature data (X_processed) is not available or is empty. Cannot generate prediction interface.")
+        return
 
     st.write("Enter values for features to get a prediction:")
 
@@ -588,22 +589,23 @@ def prediction_interface_agent():
         input_data = {}
         st.write("Input values for prediction:")
 
-        feature_columns = X_sample_data.columns # Ensure we get columns from processed X
+        feature_columns = X_sample_data.columns
 
         num_cols_per_row = 2
         cols = st.columns(num_cols_per_row)
         for i, col_name in enumerate(feature_columns):
             current_col = cols[i % num_cols_per_row]
             # Try to get a sample value to infer type for the widget
-            sample_value = X_sample_data[col_name].iloc[0] if not X_sample_data.empty else 0 # Default if X_sample_data is empty
+            sample_value = X_sample_data[col_name].iloc[0] # This assumes X_sample_data has at least one row
+            key_suffix = f"pred_input_{col_name}" # Unique key for each input widget
 
-            if pd.api.types.is_numeric_dtype(type(sample_value)) or pd.api.types.is_numeric_dtype(X_sample_data[col_name].dtype):
-                input_data[col_name] = current_col.number_input(f"Enter value for {col_name}:", value=float(sample_value), key=f"pred_input_num_{col_name}")
-            else: # This should ideally not happen if preprocessing converts everything
-                input_data[col_name] = current_col.text_input(f"Enter value for {col_name}:", value=str(sample_value), key=f"pred_input_txt_{col_name}")
+            if pd.api.types.is_numeric_dtype(X_sample_data[col_name].dtype):
+                input_data[col_name] = current_col.number_input(f"Enter value for {col_name}:", value=float(sample_value), key=key_suffix)
+            else: # This path should be less common if preprocessing is robust
+                input_data[col_name] = current_col.text_input(f"Enter value for {col_name}:", value=str(sample_value), key=key_suffix)
 
-
-        submit_button = st.form_submit_button("Get Prediction", key="get_prediction_button")
+        # The submit button MUST be inside the st.form block
+        submit_button = st.form_submit_button("Get Prediction", key="get_prediction_button_final")
 
         if submit_button:
             try:
@@ -611,12 +613,8 @@ def prediction_interface_agent():
                 input_df = pd.DataFrame([input_data], columns=feature_columns)
 
                 # Apply LabelEncoders for feature columns that were originally categorical
-                # Use the stored preprocessor_le_dict from session state
                 for col, le in st.session_state['preprocessor_le_dict'].items():
                     if col in input_df.columns:
-                        # Attempt to transform. If a new category, it will fail.
-                        # For robustness, handle unseen categories (e.g., set to mode, or encode as -1)
-                        # Here, we assume the input must be a known category.
                         try:
                             # Ensure the column in input_df is treated as object for LabelEncoder
                             input_df[col] = le.transform(input_df[col].astype(str))
@@ -644,7 +642,8 @@ def prediction_interface_agent():
                     if hasattr(model, 'predict_proba'):
                         probabilities = model.predict_proba(scaled_input_data)[0]
                         st.write("Class Probabilities:")
-                        class_names = getattr(model, 'classes_', np.unique(st.session_state.y_processed)) # Fallback if model.classes_ isn't set
+                        # Fallback for class names in case model.classes_ isn't directly available
+                        class_names = getattr(model, 'classes_', np.unique(st.session_state.y_processed) if st.session_state.y_processed is not None else range(len(probabilities)))
                         prob_df = pd.DataFrame({'Class': class_names, 'Probability': probabilities})
                         st.dataframe(prob_df.style.format({'Probability': "{:.2%}"}))
 
@@ -718,7 +717,7 @@ The Agentic AutoML AI Team
 """
             send_email_report("Initial Data Quality & Visual Report", eda_summary, client_email, [st.session_state.pdf_report_path])
             st.session_state['initial_report_sent'] = True # Mark as sent to prevent re-sending
-            st.rerun() # Rerun to remove warning of email sending
+            st.rerun() # Rerun to remove warning/update display
 
         # Client confirmation to proceed for model training
         proceed_with_training = st.checkbox("✅ Client confirmed. Proceed with model training?", key="client_proceed_checkbox_main")
@@ -771,7 +770,7 @@ The Agentic AutoML AI Team
 """
                 send_email_report("Final AutoML Model Report", model_summary, client_email)
                 st.session_state['final_report_sent'] = True # Mark as sent
-                st.rerun() # Rerun to remove warning of email sending
+                st.rerun() # Rerun to remove warning/update display
 
             if st.session_state.best_model is not None:
                 st.markdown("---")
