@@ -768,7 +768,7 @@ Thank you for using our AI service.
 Regards,
 The Agentic AutoML AI Team
 """
-               send_email_report("Final AutoML Model Report", model_summary, client_email)
+ send_email_report("Final AutoML Model Report", model_summary, client_email)
 st.session_state['final_report_sent'] = True  # Mark as sent
 st.rerun()  # Rerun to remove warning/update display
 
