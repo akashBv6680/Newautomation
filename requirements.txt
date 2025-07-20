@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+requests
+matplotlib
+seaborn
+scikit-learn
+imbalanced-learn
+xgboost
+openpyxl
+email-validator
