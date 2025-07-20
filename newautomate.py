@@ -777,7 +777,7 @@ The Agentic AutoML AI Team
         # ✅ Prediction Interface Section
         if st.session_state.best_model is not None:
             st.markdown("---")  
-    .
+    
     def prediction_interface_agent():
     """
     Provides a simple interface for making predictions with the trained model.
