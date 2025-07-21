@@ -495,7 +495,7 @@ class ModelRunner:
 
         # Fit the scaler once on the full dataset (for consistent transformation for prediction)
         self.scaler.fit(self.X)
-        for test_size in [0.1, 0.2,0.25, 0.3]:
+        for test_size in [0.1, 0.2, 0.3]:
             stratify_y = self.y if self.classification and pd.Series(self.y).nunique() > 1 else None
             X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=test_size, random_state=42, stratify=stratify_y)
 
