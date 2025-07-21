@@ -453,7 +453,7 @@ class ModelRunner:
             self.models = [
                 LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
                 DecisionTreeClassifier(random_state=42),
-                ExtraTreeClassifier(),
+                ExtraTreeClassifier(random_state=42),
                 RandomForestClassifier(random_state=42),
                 GradientBoostingClassifier(random_state=42),
                 AdaBoostClassifier(random_state=42),
@@ -470,7 +470,7 @@ class ModelRunner:
                 Ridge(random_state=42),
                 ElasticNet(random_state=42),
                 DecisionTreeRegressor(random_state=42),
-                ExtraTreeRegressor(),
+                ExtraTreeRegressor(random_state=42),
                 RandomForestRegressor(random_state=42),
                 GradientBoostingRegressor(random_state=42),
                 AdaBoostRegressor(random_state=42),
@@ -510,9 +510,9 @@ class ModelRunner:
                 model_name = model.__class__.__name__
 
                 if isinstance(model, (
-                    LogisticRegression, SVC, KNeighborsClassifier,
+                    LogisticRegression, DecisionTreeClassifier,ExtraTreeClassifier,RandomForestClassifier,GradientBoostingClassifier,AdaBoostClassifier,XGBoostClassifier,SVC, KNeighborsClassifier,
                     SVR, KNeighborsRegressor, LinearRegression,
-                    Lasso, Ridge, ElasticNet
+                    Lasso, Ridge, ElasticNet,DecisionTreeRegressor,ExtraTreeRegressor,RandomForestRegressor,AdaBoostRegressor,XGBoostRegressor,GradientBoostingRegressor
                 )):
                     current_X_train = X_train_scaled
                     current_X_test = X_test_scaled
