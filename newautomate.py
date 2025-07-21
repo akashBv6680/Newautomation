@@ -28,6 +28,30 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 import time
 import itertools # Import itertools for cycling through API keys
+# Classification
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier, ExtraTreeClassifier
+
+# Regression
+from sklearn.linear_model import LinearRegression, Lasso, Ridge, ElasticNet
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.svm import SVR
+from sklearn.neighbors import KNeighborsRegressor
+
+# Utilities
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, r2_score
+import xgboost as xgb
+import pandas as pd
+import numpy as np
+import pickle
+import streamlit as st
+
 
 # === Agent Names ===
 AGENT_NAMES = {
