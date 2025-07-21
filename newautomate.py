@@ -436,22 +436,19 @@ def visualize_and_insight_agent():
         with open(st.session_state.pdf_report_path, "rb") as f:
             st.download_button("📥 Download Visual Report", f, file_name="Insights_Report.pdf", use_container_width=True, key="download_visual_report")
 
-
-# === Model Runner with Multiple Test Sizes ===
 class ModelRunner:
-    def __init__(self, X, y):
+    def __init__(self, X, y, is_classification_task):
         self.X = X
         self.y = y
-        self.classification = self._detect_task_type()  # Must be set early
-        self.models = self._load_models()
+        self.is_classification = is_classification_task
+        self.models = []
         self.scaler = StandardScaler()
         self.results = []
         self.best_model = None
-        self.best_score = 0                   
+        self.best_score = 0
         self.best_info = {}
-        self.best_test_size = None        
+        self.best_test_size = None
 
-        
         if self.is_classification:
             self.models = [
                 LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
@@ -463,7 +460,7 @@ class ModelRunner:
             ]
             self.metric_name = "Accuracy"
             self.metric_func = accuracy_score
-        else: # Regression
+        else:
             self.models = [
                 LinearRegression(),
                 Lasso(random_state=42),
@@ -479,28 +476,25 @@ class ModelRunner:
             self.metric_name = "R2 Score"
             self.metric_func = r2_score
 
-        self.best_model = None
-        self.best_info = {}
-        self.scaler = StandardScaler() # Initialize a scaler to be used and stored
-
     def run(self):
-        """Trains and evaluates models across different test sizes, selecting the best one."""
-        best_score = -np.inf # Initialize for maximization
+        best_score = -np.inf
         best_info = {}
         best_model = None
 
         st.info(f"Training and evaluating models for {'Classification' if self.is_classification else 'Regression'}...")
         progress_bar = st.progress(0)
-        total_runs = len([0.1, 0.2, 0.25, 0.3]) * len(self.models)
+        test_sizes = [0.1, 0.2, 0.25, 0.3]
+        total_runs = len(test_sizes) * len(self.models)
         run_count = 0
 
-        # Fit the scaler once on the full dataset (for consistent transformation for prediction)
         self.scaler.fit(self.X)
-        for test_size in [0.1, 0.2,0.25, 0.3]:
-            stratify_y = self.y if self.classification and pd.Series(self.y).nunique() > 1 else None
-            X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=test_size, random_state=42, stratify=stratify_y)
 
-            # Scale data for current split
+        for size in test_sizes:
+            stratify_y = self.y if self.is_classification and pd.Series(self.y).nunique() > 1 else None
+            X_train, X_test, y_train, y_test = train_test_split(
+                self.X, self.y, test_size=size, random_state=42, stratify=stratify_y
+            )
+
             X_train_scaled = self.scaler.transform(X_train)
             X_test_scaled = self.scaler.transform(X_test)
 
@@ -509,8 +503,11 @@ class ModelRunner:
                 progress_bar.progress(run_count / total_runs)
                 model_name = model.__class__.__name__
 
-                # Use scaled data for models that require it, otherwise use original
-                if isinstance(model, (LogisticRegression, SVC, KNeighborsClassifier, SVR, KNeighborsRegressor, LinearRegression, Lasso, Ridge, ElasticNet)):
+                if isinstance(model, (
+                    LogisticRegression, SVC, KNeighborsClassifier,
+                    SVR, KNeighborsRegressor, LinearRegression,
+                    Lasso, Ridge, ElasticNet
+                )):
                     current_X_train = X_train_scaled
                     current_X_test = X_test_scaled
                 else:
@@ -520,9 +517,7 @@ class ModelRunner:
                 try:
                     model.fit(current_X_train, y_train)
                     y_pred = model.predict(current_X_test)
-
                     score = self.metric_func(y_test, y_pred)
-                    # st.write(f"Model: {model_name}, Test Size: {int(size*100)}%, {self.metric_name}: {score:.4f}") # Too much output
 
                     if score > best_score:
                         best_score = score
@@ -531,25 +526,21 @@ class ModelRunner:
                             'Model': model_name,
                             'Score': score,
                             'Type': 'Classification' if self.is_classification else 'Regression',
-                            'Test Size': f"{int(size*100)}%",
-                            'Scaler': self.scaler # Store the scaler used
+                            'Test Size': f"{int(size * 100)}%",
+                            'Scaler': self.scaler
                         }
-
                 except Exception as e:
-                    st.warning(f"Error training {model_name} with test size {int(size*100)}%: {e}")
+                    st.warning(f"Error training {model_name} with test size {int(size * 100)}%: {e}")
                     continue
 
         progress_bar.empty()
-
         self.best_model = best_model
         self.best_info = best_info
         return best_model, best_info
 
     def save_best_model(self, filename="best_model.pkl"):
-        """Saves the best performing model and its associated scaler and info."""
         if self.best_model:
             try:
-                # Store model, scaler, and info together
                 model_package = {
                     'model': self.best_model,
                     'scaler': self.scaler,
@@ -560,11 +551,12 @@ class ModelRunner:
                 }
                 with open(filename, "wb") as f:
                     pickle.dump(model_package, f)
-                st.success(f"Best model and associated preprocessors saved as '{filename}'")
+                st.success(f"Best model saved as '{filename}'")
             except Exception as e:
                 st.error(f"Failed to save the best model: {e}")
         else:
-            st.warning("No best model found to save.")
+            st.warning("No model to save.")
+
 
 # === Prediction Interface ===
 def prediction_interface_agent():
