@@ -498,6 +498,19 @@ def visualize_and_insight_agent():
     if st.session_state.pdf_report_path and os.path.exists(st.session_state.pdf_report_path):
         with open(st.session_state.pdf_report_path, "rb") as f:
             st.download_button("📥 Download Visual Report", f, file_name="Insights_Report.pdf", use_container_width=True, key="download_visual_report")
+from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso, Ridge, ElasticNet
+from sklearn.tree import DecisionTreeClassifier, ExtraTreeClassifier, DecisionTreeRegressor, ExtraTreeRegressor
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, r2_score
+import xgboost as xgb
+import numpy as np
+import pandas as pd
+import streamlit as st
+import pickle
 
 class ModelRunner:
     def __init__(self, X, y, is_classification_task):
@@ -573,9 +586,13 @@ class ModelRunner:
                 model_name = model.__class__.__name__
 
                 if isinstance(model, (
-                    LogisticRegression, DecisionTreeClassifier,ExtraTreeClassifier,RandomForestClassifier,GradientBoostingClassifier,AdaBoostClassifier,XGBoostClassifier,SVC, KNeighborsClassifier,
+                    LogisticRegression, DecisionTreeClassifier, ExtraTreeClassifier,
+                    RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, xgb.XGBClassifier,
+                    SVC, KNeighborsClassifier,
                     SVR, KNeighborsRegressor, LinearRegression,
-                    Lasso, Ridge, ElasticNet,DecisionTreeRegressor,ExtraTreeRegressor,RandomForestRegressor,AdaBoostRegressor,XGBoostRegressor,GradientBoostingRegressor
+                    Lasso, Ridge, ElasticNet,
+                    DecisionTreeRegressor, ExtraTreeRegressor, RandomForestRegressor,
+                    AdaBoostRegressor, xgb.XGBRegressor, GradientBoostingRegressor
                 )):
                     current_X_train = X_train_scaled
                     current_X_test = X_test_scaled
