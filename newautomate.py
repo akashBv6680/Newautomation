@@ -453,9 +453,10 @@ class ModelRunner:
             self.models = [
                 LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
                 DecisionTreeClassifier(random_state=42),
+                ExtraTreeClassifier(random_state=42),
                 RandomForestClassifier(random_state=42),
                 GradientBoostingClassifier(random_state=42),
-                AdaBoostClassifier (random_state=42),
+                AdaBoostClassifier(random_state=42),
                 SVC(probability=True, random_state=42),
                 KNeighborsClassifier(),
                 xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
@@ -469,8 +470,10 @@ class ModelRunner:
                 Ridge(random_state=42),
                 ElasticNet(random_state=42),
                 DecisionTreeRegressor(random_state=42),
+                ExtraTreeRegressor(random_state=42),
                 RandomForestRegressor(random_state=42),
                 GradientBoostingRegressor(random_state=42),
+                AdaBoostRegressor(random_state=42),
                 KNeighborsRegressor(),
                 SVR(),
                 xgb.XGBRegressor(random_state=42)
@@ -482,6 +485,7 @@ class ModelRunner:
         best_score = -np.inf
         best_info = {}
         best_model = None
+        all_results = []
 
         st.info(f"Training and evaluating models for {'Classification' if self.is_classification else 'Regression'}...")
         progress_bar = st.progress(0)
@@ -521,6 +525,14 @@ class ModelRunner:
                     y_pred = model.predict(current_X_test)
                     score = self.metric_func(y_test, y_pred)
 
+                    result = {
+                        'Model': model_name,
+                        'Score': score,
+                        'Type': 'Classification' if self.is_classification else 'Regression',
+                        'Test Size': f"{int(size * 100)}%"
+                    }
+                    all_results.append(result)
+
                     if score > best_score:
                         best_score = score
                         best_model = model
@@ -538,6 +550,23 @@ class ModelRunner:
         progress_bar.empty()
         self.best_model = best_model
         self.best_info = best_info
+
+        # Show all results
+        st.subheader("All Model Results")
+        for res in sorted(all_results, key=lambda x: x['Score'], reverse=True):
+            st.write(f"{res['Model']} | Score: {res['Score']:.4f} | Type: {res['Type']} | Test Size: {res['Test Size']}")
+
+        # Show top 3 models between 80%-90% accuracy or R2
+        filtered_results = [r for r in all_results if 0.80 <= r['Score'] <= 0.90]
+        top_3 = sorted(filtered_results, key=lambda x: x['Score'], reverse=True)[:3]
+
+        if top_3:
+            st.subheader("Agent AI Selected Top 3 Models (Score 80-90%)")
+            for res in top_3:
+                st.success(f"{res['Model']} | Score: {res['Score']:.4f} | Type: {res['Type']} | Test Size: {res['Test Size']}")
+        else:
+            st.info("No models found with score between 80% and 90%.")
+
         return best_model, best_info
 
     def save_best_model(self, filename="best_model.pkl"):
@@ -558,6 +587,7 @@ class ModelRunner:
                 st.error(f"Failed to save the best model: {e}")
         else:
             st.warning("No model to save.")
+
 
 
 # === Prediction Interface ===
