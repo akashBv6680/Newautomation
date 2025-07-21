@@ -729,7 +729,7 @@ The Agentic AutoML AI Team
             if not st.session_state.model_training_completed:
                 st.info("Starting model training and selection...")
                 model_runner = ModelRunner(st.session_state.X_processed, st.session_state.y_processed, st.session_state.is_classification_task)
-                best_model, best_score,best_info ,best_test_size= model_runner.run()
+                best_model,best_info= model_runner.run()
                 if best_model:
                     st.sidebar.success("Model training complete!")
                     st.success(f"Best Model: **{best_info['Model']}** | Score: **{best_info['Score']:.4f}** | Type: **{best_info['Type']}** | Test Size: **{best_info['Test Size']}**")
