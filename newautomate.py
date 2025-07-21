@@ -439,11 +439,18 @@ def visualize_and_insight_agent():
 
 # === Model Runner with Multiple Test Sizes ===
 class ModelRunner:
-    def __init__(self, X, y, is_classification):
+    def __init__(self, X, y):
         self.X = X
         self.y = y
-        self.is_classification = is_classification
+        self.classification = self._detect_task_type()  # Must be set early
+        self.models = self._load_models()
+        self.scaler = StandardScaler()
+        self.results = []
+        self.best_model = None
+        self.best_score = 0
+        self.best_info = {}
 
+        
         if self.is_classification:
             self.models = [
                 LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
