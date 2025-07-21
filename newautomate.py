@@ -51,6 +51,26 @@ import pandas as pd
 import numpy as np
 import pickle
 import streamlit as st
+# Core ML imports
+from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso, Ridge, ElasticNet
+from sklearn.tree import DecisionTreeClassifier, ExtraTreeClassifier, DecisionTreeRegressor, ExtraTreeRegressor
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, r2_score
+
+# XGBoost (ensure it's installed)
+import xgboost as xgb
+
+# Utils
+import numpy as np
+import pandas as pd
+import pickle
+import streamlit as st
+
 
 
 # === Agent Names ===
