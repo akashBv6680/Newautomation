@@ -452,8 +452,10 @@ class ModelRunner:
         if self.is_classification:
             self.models = [
                 LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
+                DecisionTreeClassifier(random_state=42),
                 RandomForestClassifier(random_state=42),
                 GradientBoostingClassifier(random_state=42),
+                AdaBoostClassifier (random_state=42),
                 SVC(probability=True, random_state=42),
                 KNeighborsClassifier(),
                 xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
