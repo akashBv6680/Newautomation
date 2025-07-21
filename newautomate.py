@@ -585,20 +585,8 @@ class ModelRunner:
                 progress_bar.progress(run_count / total_runs)
                 model_name = model.__class__.__name__
 
-                if isinstance(model, (
-                    LogisticRegression, DecisionTreeClassifier, ExtraTreeClassifier,
-                    RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, xgb.XGBClassifier,
-                    SVC, KNeighborsClassifier,
-                    SVR, KNeighborsRegressor, LinearRegression,
-                    Lasso, Ridge, ElasticNet,
-                    DecisionTreeRegressor, ExtraTreeRegressor, RandomForestRegressor,
-                    AdaBoostRegressor, xgb.XGBRegressor, GradientBoostingRegressor
-                )):
-                    current_X_train = X_train_scaled
-                    current_X_test = X_test_scaled
-                else:
-                    current_X_train = X_train
-                    current_X_test = X_test
+                current_X_train = X_train_scaled
+                current_X_test = X_test_scaled
 
                 try:
                     model.fit(current_X_train, y_train)
@@ -647,7 +635,7 @@ class ModelRunner:
         else:
             st.info("No models found with score between 80% and 90%.")
 
-        return best_model, best_info
+        return top_3[0]['Model'] if top_3 else best_model, top_3[0] if top_3 else best_info
 
     def save_best_model(self, filename="best_model.pkl"):
         if self.best_model:
@@ -667,7 +655,6 @@ class ModelRunner:
                 st.error(f"Failed to save the best model: {e}")
         else:
             st.warning("No model to save.")
-
 
 
 # === Prediction Interface ===
