@@ -453,7 +453,7 @@ class ModelRunner:
             self.models = [
                 LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
                 DecisionTreeClassifier(random_state=42),
-                ExtraTreeClassifier(random_state=42),
+                ExtraTreeClassifier(),
                 RandomForestClassifier(random_state=42),
                 GradientBoostingClassifier(random_state=42),
                 AdaBoostClassifier(random_state=42),
@@ -470,7 +470,7 @@ class ModelRunner:
                 Ridge(random_state=42),
                 ElasticNet(random_state=42),
                 DecisionTreeRegressor(random_state=42),
-                ExtraTreeRegressor(random_state=42),
+                ExtraTreeRegressor(),
                 RandomForestRegressor(random_state=42),
                 GradientBoostingRegressor(random_state=42),
                 AdaBoostRegressor(random_state=42),
